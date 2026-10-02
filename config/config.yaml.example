@@ -1,0 +1,61 @@
+storage:
+  tasks: "~/Documents/llm_brain/tasks.yaml"
+  events: "~/Documents/llm_brain/events.yaml"
+  emails: "~/Documents/llm_brain/emails.yaml"
+  documents: "~/Documents/llm_brain/documents.yaml"
+  doc_taxonomy: "~/Documents/llm_brain/doc_taxonomy.yaml"
+  journal_dir: "~/Documents/llm_brain/journal"
+  profiles_dir: "~/Documents/llm_brain/profiles"
+  recurring_tasks: "~/Documents/llm_brain/recurring_tasks.yaml"
+  recurring_events: "~/Documents/llm_brain/recurring_events.yaml"
+
+telegram:
+  config_file: "~/Documents/llm_brain/telegram.json"
+
+gcal:
+  credentials: "~/Documents/llm_brain/credentials.json"
+  token: "~/Documents/llm_brain/google_token.json"
+  calendars:
+    - id: "primary"
+      label: "personal"
+    - id: "YOUR_FAMILY_CALENDAR_ID@group.calendar.google.com"
+      label: "family"
+  sync_days_ahead: 60
+
+gdrive:
+  credentials: "~/Documents/llm_brain/credentials.json"
+  drive_token: "~/Documents/llm_brain/google_drive_token.json"
+  scanned_folder: "scanned"
+
+nas:
+  host: "YOUR_NAS_HOSTNAME"
+  share: "YOUR_SMB_SHARE"
+  base_path: "your/path/to/docs"
+  username: "YOUR_SMB_USERNAME"
+  password: "CHANGE_ME"
+
+gmail:
+  credentials: "~/Documents/llm_brain/credentials.json"
+  token: "~/Documents/llm_brain/google_token.json"
+  sync_days_back: 10
+  labels_to_sync:
+    - INBOX
+
+# Telegram notifications (scripts/notify.py). All optional — these are the defaults.
+notify:
+  quiet_start: "22:30"
+  quiet_end: "07:00"
+  workday_slots: {digest: "09:00", lunch: "13:00", evening: "19:30"}
+  offday_slots:  {digest: "08:30", errands: "10:30", evening: "19:00"}
+  away_slots:    {digest: "09:00"}
+  review_time: "11:00"        # Sundays: tasks overdue > stale_after_days
+  daily_cap: 3                # max batched slot messages/day (critical, digest, events don't count)
+  critical_repeat_min: 60
+  event_lead_min: 30          # reminder lead when the event has no "Depart by HH:MM"
+  stale_after_days: 14
+  lookahead_days: 3
+  trip_warning_days: 7
+  backlog_suggestions: 3      # undated tasks suggested in the off-day digest
+
+# Timezone for all dates/times (IANA name). Default: the system timezone.
+# timezone: "Europe/Berlin"

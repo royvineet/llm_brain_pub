@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Data lives outside the repo at ~/Documents/llm_brain/ (see config/config.yaml)
+
+# Claude Code local settings (commands and skills are project config, commit them)
+.claude/*
+!.claude/commands/
+!.claude/skills/
+# Personal skills are symlinked in from <data>/extensions/skills as local-* (never commit)
+.claude/skills/local-*
+# Personal instructions (symlink to <data>/extensions/CLAUDE.md)
+CLAUDE.local.md
+
+# Config lives in the data directory (~/Documents/llm_brain/config.yaml)
+config/config.yaml
+
+# Secrets
+secrets.yaml
+*.secret
+credentials.json
+google_token.json
+token.json
+telegram.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
