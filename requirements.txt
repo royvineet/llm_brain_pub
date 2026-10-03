@@ -7,3 +7,4 @@ anthropic>=0.40
 smbprotocol>=1.12
 playwright>=1.47
 keyring>=25
+parakeet-mlx>=0.5; sys_platform == "darwin" and platform_machine == "arm64"   # voice notes (needs ffmpeg)

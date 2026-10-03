@@ -26,7 +26,7 @@ Open = `status` is `pending` or `in_progress`.
 Within each top-level group, **classify into sub-buckets**:
 - **Errands** — tasks tagged `errands` (calls, bookings, purchases, admin, finance, family logistics)
 - **Career / Hobby** — tasks tagged `hobby`, `study`, `ai`, `tinkering`, `hardware` (deep/creative work)
-- **Other / Core** — anything else (e.g. core work engineering tasks)
+- **Other / Core** — anything else (e.g. core work tasks)
 
 Within each sub-bucket sort by: `due_date` (soonest/overdue first, `null` last), then `priority` (high → low).
 
@@ -37,11 +37,11 @@ Do **not** dump every task. Triage:
   - Anything **due today or within 2 days**
   - Any `priority: high` task, dated or not
   - Any task that fits a **protected block happening today** (per `directives.md`)
-- **Condense (summarize, don't enumerate):** undated backlog tasks. Show a one-line count per sub-bucket with 1–2 examples, e.g. *"+ 11 undated work tasks (engineering backlog) — say `show work backlog` to list."* Don't print all of them.
+- **Condense (summarize, don't enumerate):** undated backlog tasks. Show a one-line count per sub-bucket with 1–2 examples, e.g. *"+ 11 undated work tasks (project backlog) — say `show work backlog` to list."* Don't print all of them.
 
 ### Step 5 — Time-aware suggestions ("what to do, when")
 This is the differentiator. Using the **current time**, today's **events**, the **directives** (protected blocks), and **tasks.md** (durations + energy fit), propose a light plan for the *remaining* part of the day. Map tasks to the natural energy windows that are still ahead:
-- **Morning (focused/energetic):** deep work — core engineering, high-priority goal work, focused study. Also fitness if it's early.
+- **Morning (focused/energetic):** deep work — core work, high-priority goal work, focused study. Also fitness if it's early.
 - **Work hours:** core work tasks and work errands (calls during business hours).
 - **Midday/low-energy dips:** quick errands, admin, finance, low-energy calls.
 - **Protected blocks from `directives.md`:** the work they protect (defend these).

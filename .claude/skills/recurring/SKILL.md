@@ -53,15 +53,15 @@ Templates for routine calendar blocks (work blocks, commute). At startup, `scrip
 ```yaml
 recurring_events:
   - id: re1
-    title: "PR Review block"
+    title: "Focus block"
     description: "..."
     tags: [work]
     location: ""
     recurrence:
       type: daily_weekday       # only supported type: Mon–Fri
-      time: "11:00"
+      time: "10:00"
       duration_min: 60
-      weekday_times: {4: "10:00"}   # optional per-weekday override (0=Mon … 4=Fri)
+      weekday_times: {4: "09:00"}   # optional per-weekday override (0=Mon … 4=Fri)
     end_date: "2026-12-31"      # optional — stop generating after this date
     skip_holidays: true
     skip_blackouts: true

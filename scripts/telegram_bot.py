@@ -18,8 +18,10 @@ Usage:
 """
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -29,6 +31,7 @@ import yaml
 
 import brain_context
 import human_input
+import speech
 from task import locked_tasks
 
 CONFIG_PATH = Path.home() / "Documents" / "llm_brain" / "config.yaml"
@@ -57,7 +60,8 @@ Speed matters — every tool call adds seconds:
 - Change tasks with ONE command, never by editing tasks.yaml:
   .venv/bin/python scripts/task.py add --title "..." --due YYYY-MM-DD --priority low|medium|high
       --category personal|work --tags personal,errands [--actionable business_hours|anytime|weekend|office]
-      [--remind critical|important|routine --remind-at HH:MM --remind-days-before 5,2 --lapse] [--description "..."]
+      [--reminder [HH:MM]  ← ONLY if the user asked to be reminded; bare = configured default time]
+      [--remind critical|important|routine --remind-days-before 5,2 --lapse] [--description "..."]
   .venv/bin/python scripts/task.py update ID [same flags] [--clear due,remind_at]
   .venv/bin/python scripts/task.py done|cancel ID [ID ...]
   Recurring things (meds, bills) go in recurring_tasks.yaml instead (see CLAUDE.md).
@@ -67,6 +71,10 @@ Web automation (logins to sites): run `.venv/bin/python scripts/web.py run SITE 
 (`web.py list` shows what exists). It detaches immediately; tell the user the 2FA prompt and the result will
 arrive here on Telegram — don't wait for it.
 If a run failed, read ~/Library/Logs/llm_brain/web.log (and the latest web-<site>-*.txt outline) to explain why.
+Background jobs (web.py runs, scheduled-job scripts): start each one ONCE with the documented command. Never start
+alternatives in parallel or retry while one may still be running (check ~/Library/Logs/llm_brain/web.log first) —
+parallel runs each ask for their own 2FA code and confuse the handoff. If a command is denied, tell the user;
+don't look for another way to launch it (no nohup, &, launchctl).
 
 Replies: short plain text, bullets with '•', no markdown tables or headings. Confirm changes
 in one line, mentioning any reminder settings you chose. If you need clarification, ask one question."""
@@ -154,6 +162,7 @@ class ClaudeSession:
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT,
+                                    stdin=subprocess.DEVNULL,  # claude -p appends piped stdin to the prompt
                                     timeout=CLAUDE_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             self.reset()
@@ -223,8 +232,44 @@ def _apply(doc: dict, action: str, task_id: int, parts: list[str]) -> tuple[str,
     return msg, follow_up
 
 
+def transcribe_voice(token: str, chat_id: int, voice: dict) -> str | None:
+    """Download a Telegram voice/audio note, transcribe it locally, echo the transcript. None on failure."""
+    if problem := speech.available():
+        send_message(token, chat_id, f"🎙 Voice notes aren't set up on the Mac: {problem}")
+        return None
+    api(token, "sendChatAction", chat_id=chat_id, action="typing")
+    info = api(token, "getFile", file_id=voice["file_id"])["result"]
+    audio = requests.get(f"https://api.telegram.org/file/bot{token}/{info['file_path']}", timeout=60)
+    audio.raise_for_status()
+    with tempfile.NamedTemporaryFile(suffix=Path(info["file_path"]).suffix or ".oga") as f:
+        f.write(audio.content)
+        f.flush()
+        try:
+            text = speech.transcribe(Path(f.name))
+        except Exception as e:
+            send_message(token, chat_id, f"🎙 Couldn't transcribe that: {e}")
+            return None
+    if not text:
+        send_message(token, chat_id, "🎙 I couldn't make out any words — try again?")
+        return None
+    send_message(token, chat_id, f"🎙 “{text}”")
+    return text
+
+
+def start_google_renew() -> str:
+    """Open Google's sign-in on the Mac (detached); google_auth.py reports the result on Telegram."""
+    env = {**os.environ, "LLM_BRAIN_HEADLESS": "0", "PYTHONWARNINGS": "ignore"}
+    log = open(Path.home() / "Library/Logs/llm_brain/google_auth.log", "a")
+    subprocess.Popen([sys.executable, str(REPO_ROOT / "scripts/google_auth.py"), "--renew"], env=env,
+                     stdout=log, stderr=subprocess.STDOUT, start_new_session=True, cwd=REPO_ROOT)
+    return "Sign-in opened in a browser on the Mac — finish it there (10 min)."
+
+
 def handle_callback(token: str, cb: dict, tasks_path: Path):
     data = cb.get("data", "")
+    if data == "gauth":
+        api(token, "answerCallbackQuery", callback_query_id=cb["id"], text=start_google_renew())
+        return
     follow_up = None
     try:
         status, follow_up = apply_task_action(tasks_path, data)
@@ -268,6 +313,8 @@ def main():
     claude = ClaudeSession(tasks_path.parent)
     offset = 0
 
+    if speech.available() is None:  # load the speech model up front so the first voice note is quick
+        speech.model()
     print("Bot started. Relaying messages to Claude Code...", flush=True)
 
     while True:
@@ -295,13 +342,21 @@ def main():
                     continue
 
                 text = msg.get("text", "").strip()
+                voice = msg.get("voice") or msg.get("audio") or msg.get("video_note")
+                if not text and voice:
+                    text = transcribe_voice(token, chat_id, voice)
                 if not text:
                     continue
                 # A web automation run waiting for a 2FA code gets it first.
-                req = human_input.pending()
-                if req and human_input.claims(req, text, (msg.get("reply_to_message") or {}).get("message_id")):
+                req, dead = human_input.match(text, (msg.get("reply_to_message") or {}).get("message_id"))
+                if req:
                     human_input.answer(req, text)
-                    send_message(token, chat_id, "🔑 Got it — continuing.")
+                    site = req.get("prompt", "").split(":", 1)[0]
+                    send_message(token, chat_id, f"🔑 Got it — sent to {site}.")
+                    continue
+                if dead:
+                    send_message(token, chat_id, "That prompt is no longer waiting (expired or the run was "
+                                                 "stopped). Wait for a fresh 🔐 prompt and reply to that one.")
                     continue
 
                 if text == "/start":
@@ -312,6 +367,9 @@ def main():
                     send_message(token, chat_id, "Started a fresh conversation.")
                     continue
 
+                if voice:  # tell Claude the text came from speech recognition
+                    text = ("[Voice message, transcribed on-device — may contain recognition errors. If a name, "
+                            "date or number looks misheard, check it against tasks/profiles or ask.]\n" + text)
                 print(f"→ Claude: {text}", flush=True)
                 api(token, "sendChatAction", chat_id=chat_id, action="typing")
                 # Replying to a notification ("done", "move to Sat") only makes sense

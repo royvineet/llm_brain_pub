@@ -45,6 +45,10 @@ import sites
 from telegram_notify import send, send_photo
 
 CONFIG_PATH = Path.home() / "Documents" / "llm_brain" / "config.yaml"
+# Real Google Chrome when installed: Playwright's bundled "Chrome for Testing" crashed
+# repeatedly (SIGSEGV) on macOS around site exports. Falls back to the bundled build.
+CHROME_APP = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+CHANNEL = "chrome" if CHROME_APP.exists() else None
 LOG_DIR = Path.home() / "Library" / "Logs" / "llm_brain"
 
 
@@ -154,7 +158,7 @@ def run(site: str, action: str, headless: bool, quiet: bool = False):
                 # Drop the obvious automation markers — some sites 403 a stock automated browser.
                 try:
                     browser = p.chromium.launch_persistent_context(
-                        str(profile), headless=headless, accept_downloads=True,
+                        str(profile), channel=CHANNEL, headless=headless, accept_downloads=True,
                         # No locale/timezone_id override (the system's is used); the timezone
                         # override made Chromium segfault while a site built an in-page XLSX export.
                         viewport={"width": 1366, "height": 900},
@@ -208,9 +212,12 @@ def open_profile(site: str, url: str | None):
     automation flags — so you can sign in by hand (Google refuses sign-ins from
     automated browsers). Cookies stay in the profile for later recipe runs.
     """
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as p:
-        exe = p.chromium.executable_path
+    if CHANNEL == "chrome":
+        exe = str(CHROME_APP)
+    else:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            exe = p.chromium.executable_path
     profile = data_dir() / "web" / "profiles" / site
     profile.mkdir(parents=True, exist_ok=True)
     url = url or getattr(site_modules()[site], "OPEN_URL", "about:blank")

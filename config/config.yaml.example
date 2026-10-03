@@ -43,12 +43,13 @@ gmail:
 
 # Telegram notifications (scripts/notify.py). All optional — these are the defaults.
 notify:
-  quiet_start: "22:30"
+  quiet_start: "22:00"
   quiet_end: "07:00"
-  workday_slots: {digest: "09:00", lunch: "13:00", evening: "19:30"}
-  offday_slots:  {digest: "08:30", errands: "10:30", evening: "19:00"}
+  critical_until: "23:00"     # critical reminders may still ping until this
+  workday_slots: {digest: "08:00", lunch: "12:30", evening: "18:30"}
+  offday_slots:  {digest: "09:00", errands: "10:00", evening: "18:00"}
   away_slots:    {digest: "09:00"}
-  review_time: "11:00"        # Sundays: tasks overdue > stale_after_days
+  review_time: "10:00"        # Sundays: tasks overdue > stale_after_days
   daily_cap: 3                # max batched slot messages/day (critical, digest, events don't count)
   critical_repeat_min: 60
   event_lead_min: 30          # reminder lead when the event has no "Depart by HH:MM"
@@ -56,6 +57,13 @@ notify:
   lookahead_days: 3
   trip_warning_days: 7
   backlog_suggestions: 3      # undated tasks suggested in the off-day digest
+  default_remind_at: "09:00"  # time used when you ask for a reminder without giving one
+  auto_remind: false          # true: also ping high-priority / dated tasks you didn't ask a reminder for
 
 # Timezone for all dates/times (IANA name). Default: the system timezone.
 # timezone: "Europe/Berlin"
+
+# Voice notes (scripts/speech.py) — on-device speech-to-text via MLX. Optional.
+# speech:
+#   model: "mlx-community/parakeet-tdt-0.6b-v2"     # default: English, fastest
+#   # model: "mlx-community/whisper-large-v3-turbo" # multilingual (pip install mlx-whisper)

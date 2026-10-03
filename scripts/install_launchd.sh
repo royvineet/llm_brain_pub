@@ -44,8 +44,11 @@ AGENT_PATH="$(dirname "${CLAUDE_BIN}"):/usr/local/bin:/usr/bin:/bin"
 
 mkdir -p "${AGENTS_DIR}" "${LOG_DIR}"
 
-write_plist() {  # label script schedule-xml — script is relative to scripts/ or an absolute path
-  local interpreter="${PYTHON}" script="$2"
+write_plist() {  # label "script [args...]" schedule-xml — script is relative to scripts/ or an absolute path
+  local interpreter="${PYTHON}" parts script extra=""
+  read -r -a parts <<< "$2"
+  script="${parts[0]}"
+  for arg in "${parts[@]:1}"; do extra+="        <string>${arg}</string>"$'\n'; done
   [[ "${script}" == /* ]] || script="${REPO_ROOT}/scripts/${script}"
   [[ "${script}" == *.sh ]] && interpreter="/bin/bash"
   cat > "${AGENTS_DIR}/$1.plist" <<EOF
@@ -58,7 +61,7 @@ write_plist() {  # label script schedule-xml — script is relative to scripts/ 
     <array>
         <string>${interpreter}</string>
         <string>${script}</string>
-    </array>
+${extra}    </array>
     <key>WorkingDirectory</key><string>${REPO_ROOT}</string>
     <key>EnvironmentVariables</key>
     <dict>

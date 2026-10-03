@@ -113,8 +113,10 @@ To interact with llm_brain via Telegram:
 
 **Chatting:** every message you send is passed to `claude -p` in this repo; follow-ups within an hour continue the same session (`/new` resets).
 
+**Voice notes:** send a Telegram voice message and it is transcribed on the Mac (Apple Silicon, MLX — NVIDIA Parakeet by default, Whisper optional), echoed back, and handled like typed text. Needs `brew install ffmpeg`; the ~1.2 GB model downloads on first use.
+
 **Smart notifications** (`scripts/notify.py`, no LLM involved) — timed around your day instead of firing at random:
-- **Day types:** workday, off-day (weekends/holidays), away (vacations). Each has its own slots — e.g. workday digest at 09:00, lunch 13:00, evening 19:30 — and nothing non-urgent lands during work hours except lunch.
+- **Day types:** workday, off-day (weekends/holidays), away (vacations). Each has its own slots — e.g. a workday digest, a lunch slot and an evening slot, at times you set in `config.yaml` — and nothing non-urgent lands during work hours except lunch.
 - **Tiers:** *critical* (meds, payments due today) ping at a set time and repeat once until ticked ✓; *important* tasks get one batched ✓/Snooze ping in the slot that fits when they can actually be done (`actionable: business_hours` → lunch / errand window, `anytime` → evening, `weekend` → off-days); *routine* stays in the digest.
 - **Fatigue controls:** quiet hours, daily cap, heads-up days (`remind_days_before`), overdue items fade out, missed meds lapse (`lapse: true`), third snooze asks "drop or reschedule?", Sunday review of stale tasks.
 - **Off-days** also suggest backlog tasks and a goal to work on.

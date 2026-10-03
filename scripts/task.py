@@ -13,9 +13,10 @@ Usage:
     python scripts/task.py cancel 42
     python scripts/task.py show 42
 
-Reminder fields (see notify.py): --remind critical|important|routine,
---remind-at HH:MM, --remind-days-before 5,2, --actionable
-business_hours|anytime|weekend|office, --lapse.
+Reminders (see notify.py) are opt-in — set them only when the user asks:
+--reminder [HH:MM] (ping at that time on the due day; bare = notify.default_remind_at),
+--remind critical|important|routine, --remind-days-before 5,2,
+--actionable business_hours|anytime|weekend|office, --lapse.
 
 Every write holds an exclusive lock on tasks.yaml.lock, so concurrent writers
 (Claude, bot buttons, generators) don't clobber each other.
@@ -23,6 +24,7 @@ Every write holds an exclusive lock on tasks.yaml.lock, so concurrent writers
 
 import argparse
 import fcntl
+import re
 import sys
 from contextlib import contextmanager
 from datetime import date
@@ -59,6 +61,11 @@ def locked_tasks(path: Path | None = None):
         yield doc
         path.write_text(yaml.dump(doc, default_flow_style=False, allow_unicode=True, sort_keys=False),
                         encoding="utf-8")
+
+
+def default_remind_at() -> str:
+    cfg = yaml.safe_load(CONFIG_PATH.read_text()) or {}
+    return str((cfg.get("notify") or {}).get("default_remind_at", "09:00"))
 
 
 def find(doc: dict, task_id: int) -> dict:
@@ -101,6 +108,12 @@ def apply_fields(t: dict, a: argparse.Namespace):
         t["remind_days_before"] = [int(x) for x in a.remind_days_before.split(",") if x.strip()]
     if a.lapse:
         t["lapse"] = True
+    if a.reminder:
+        t["remind_at"] = default_remind_at() if a.reminder == "default" else a.reminder
+        if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t["remind_at"]):
+            sys.exit("error: reminder time must be HH:MM (24h)")
+        if not t.get("due_date"):
+            sys.exit("error: a reminder needs a due date (--due)")
     for field in (a.clear or "").split(","):
         field = {"due": "due_date"}.get(field.strip(), field.strip())
         if field in ("due_date", "ttl_days"):
@@ -135,6 +148,8 @@ def main():
         p.add_argument("--remind-days-before", dest="remind_days_before", help="e.g. 5,2")
         p.add_argument("--actionable")
         p.add_argument("--lapse", action="store_true")
+        p.add_argument("--reminder", nargs="?", const="default", metavar="HH:MM",
+                       help="ping on the due day at HH:MM (bare --reminder = notify.default_remind_at)")
         p.add_argument("--clear", help="comma-separated fields to unset, e.g. due,remind_at")
 
     fields(sub.add_parser("add"), required_title=True)

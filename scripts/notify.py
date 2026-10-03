@@ -15,8 +15,10 @@ Every open task gets a reminder TIER:
              for the task's `actionable` kind, on its due day, on each of its
              `remind_days_before` days, and on overdue days 1, 3 and 7.
   routine    Digest only.
-Explicit `remind:` on the task wins; otherwise high → important, medium with a
-due date → important, everything else → routine.
+Reminders are opt-in: a task pings only if it has `remind:` or `remind_at:`
+(set when the user asks to be reminded; `remind_at` alone = one ping at that time).
+With notify.auto_remind: true, high → important and dated medium → important too.
+"Remind me" without a time uses notify.default_remind_at (default 09:00).
 
 `lapse: true` — a missed occurrence just expires (meds, "take X"): no overdue
 pings and it drops out of the digest the day after it was due.
@@ -27,9 +29,9 @@ Every task has an ACTIONABLE kind (default `anytime`) — when it can be done:
   weekend         needs a free day (tinkering, outings)
   office          needs to be at the office (printouts)
 
-Each day is a DAY TYPE with its own slots (times configurable under notify:):
-  workday  digest 09:00 (planning slot) · lunch 13:00 · evening 19:30
-  offday   digest 08:30 · errands 10:30 · evening 19:00      (weekends, public holidays)
+Each day is a DAY TYPE with its own slots (defaults below; set your own under notify: in config.yaml):
+  workday  digest 08:00 · lunch 12:30 · evening 18:30
+  offday   digest 09:00 · errands 10:00 · evening 18:00      (weekends, public holidays)
   away     digest 09:00 only + critical + event reminders  (vacations, blackouts)
 
 Which kinds each slot delivers:
@@ -70,13 +72,14 @@ from telegram_notify import send
 CONFIG_PATH = Path.home() / "Documents" / "llm_brain" / "config.yaml"
 
 DEFAULTS = {
-    "quiet_start": "22:30",
+    # Neutral defaults — set your own routine under `notify:` in config.yaml.
+    "quiet_start": "22:00",
     "quiet_end": "07:00",
-    "critical_until": "23:30",       # critical pings may run past quiet_start until this
-    "workday_slots": {"digest": "09:00", "lunch": "13:00", "evening": "19:30"},
-    "offday_slots": {"digest": "08:30", "errands": "10:30", "evening": "19:00"},
+    "critical_until": "23:00",       # critical pings may run past quiet_start until this
+    "workday_slots": {"digest": "08:00", "lunch": "12:30", "evening": "18:30"},
+    "offday_slots": {"digest": "09:00", "errands": "10:00", "evening": "18:00"},
     "away_slots": {"digest": "09:00"},
-    "review_time": "11:00",          # Sundays
+    "review_time": "10:00",          # Sundays
     "daily_cap": 3,
     "critical_repeat_min": 60,
     "event_lead_min": 30,
@@ -84,6 +87,8 @@ DEFAULTS = {
     "lookahead_days": 3,
     "trip_warning_days": 7,
     "backlog_suggestions": 3,
+    "default_remind_at": "09:00",    # time used when you ask for a reminder without giving one
+    "auto_remind": False,            # True: also ping high-priority / dated tasks you didn't ask reminders for
 }
 
 SLOT_KINDS = {
@@ -220,13 +225,21 @@ def is_routine_todo(t: dict) -> bool:
     return bool(t.get("ttl_days")) and t.get("priority", "low") == "low" and not t.get("remind")
 
 
+AUTO_REMIND = DEFAULTS["auto_remind"]  # set from config in main()
+
+
 def tier(t: dict) -> str:
+    """Reminders are opt-in: a task pings only if it has `remind` or `remind_at` (set when the user asks),
+    unless notify.auto_remind is on, which also infers pings from priority/due date."""
     if t.get("remind") in ("critical", "important", "routine"):
         return t["remind"]
-    if t.get("priority") == "high":
+    if t.get("remind_at"):
         return "important"
-    if t.get("priority") == "medium" and t.get("due_date") and not t.get("ttl_days"):
-        return "important"
+    if AUTO_REMIND:
+        if t.get("priority") == "high":
+            return "important"
+        if t.get("priority") == "medium" and t.get("due_date") and not t.get("ttl_days"):
+            return "important"
     return "routine"
 
 
@@ -360,6 +373,10 @@ def build_digest(ctx: dict, state: State) -> str:
         lines.append(f"\n<i>{len(stale)} task(s) overdue >{cfg['stale_after_days']}d — Sunday review will list them.</i>")
     if ctx.get("auth_problem"):
         lines.append(f"\n⚠️ {esc(ctx['auth_problem'])}")
+    elif (exp := ctx.get("login_expiry")) and 0 <= (exp.date() - today).days <= 1:
+        when = "today" if exp.date() == today else "tomorrow"
+        lines.append(f"\n🔑 Google login expires {when} at {exp:%H:%M} — tap Renew in the 🔑 message, "
+                     f"or run scripts/google_auth.py --renew")
     if len(lines) == 1:
         lines.append("Nothing scheduled or due. 👌")
     return "\n".join(lines)
@@ -387,13 +404,19 @@ def offday_suggestions(ctx: dict, state: State) -> list[str]:
     return out
 
 
+def is_timed(t: dict) -> bool:
+    """Pinged at a specific time on its due day (rather than batched into a slot)."""
+    return tier(t) == "critical" or (bool(t.get("remind_at")) and tier(t) != "routine")
+
+
 def build_critical(ctx: dict, state: State) -> list[tuple[str, str, list]]:
-    """Critical tasks: first ping at remind_at (or first slot), one repeat if unacknowledged."""
+    """Timed reminders on the due day: ping at remind_at (critical without one: first slot).
+    Critical ones repeat once if unacknowledged."""
     now, today, cfg = ctx["now"], ctx["today"], ctx["cfg"]
     first_slot = min(ctx["slots"].values(), key=hm)
     out = []
     for t in open_tasks(ctx["tasks"]):
-        if tier(t) != "critical":
+        if not is_timed(t):
             continue
         due = parse_day(t.get("due_date"))
         if due and due != today:
@@ -404,7 +427,7 @@ def build_critical(ctx: dict, state: State) -> list[tuple[str, str, list]]:
         k1, k2 = f"crit:{t['id']}:{today}", f"crit2:{t['id']}:{today}"
         if not state.seen(k1):
             out.append((k1, f"🔔 {task_line(t, today)}", [task_button_row(t)]))
-        elif not state.seen(k2):
+        elif tier(t) == "critical" and not state.seen(k2):
             first = state.sent_at(k1)
             if first and now - first >= timedelta(minutes=cfg["critical_repeat_min"]):
                 out.append((k2, f"🔔 Reminder — still open:\n{task_line(t, today)}", [task_button_row(t)]))
@@ -421,7 +444,9 @@ def build_slot(ctx: dict, slot: str) -> tuple[str, str, list] | None:
         reason = wants_ping_today(t, today)
         if not reason:
             continue
-        if tier(t) == "important" or (tier(t) == "critical" and reason != "due"):
+        if reason == "due" and is_timed(t):
+            continue  # pinged at its own time instead
+        if tier(t) in ("important", "critical"):
             picked.append(t)
     if not picked:
         return None
@@ -482,6 +507,35 @@ def at_or_after(now: datetime, t: str) -> bool:
     return (now.hour, now.minute) >= hm(t)
 
 
+def google_login_expiry() -> datetime | None:
+    """Expiry of the Calendar + Gmail sign-in (OAuth app in Testing mode → 7 days after sign-in)."""
+    try:
+        from google_auth import token_expiry
+        app_cfg = load_yaml(CONFIG_PATH)
+        exp = token_expiry(Path(app_cfg["gcal"]["token"]).expanduser())
+        return exp.replace(tzinfo=TZ) if exp else None
+    except Exception:
+        return None
+
+
+RENEW_BUTTON = [[("🔑 Renew now (opens sign-in on the Mac)", "gauth")]]
+
+
+def build_login_warning(ctx: dict, evening: bool) -> tuple[str, str, list] | None:
+    """Google login about to expire: a Renew-button message the evening before, and again on the
+    expiry day (first run after quiet hours) if it hasn't been renewed yet."""
+    exp, now = ctx.get("login_expiry"), ctx["now"]
+    if not exp or now >= exp:
+        return None
+    days = (exp.date() - ctx["today"]).days
+    if (days == 1 and evening) or days == 0:
+        when = "tomorrow" if days == 1 else "today"
+        return (f"gauth:{ctx['today']}", f"🔑 Your Google Calendar/Gmail login expires {when} at "
+                f"{exp:%H:%M}. Renew it now — tap below, then finish the sign-in on the Mac "
+                f"(or via Screen Sharing).", RENEW_BUTTON)
+    return None
+
+
 def check_auth() -> str | None:
     try:
         from google_auth import AuthRequired, SHARED_SCOPES, get_credentials
@@ -504,6 +558,8 @@ def main():
 
     app_cfg = load_yaml(CONFIG_PATH)
     cfg = {**DEFAULTS, **(app_cfg.get("notify") or {})}
+    global AUTO_REMIND
+    AUTO_REMIND = bool(cfg["auto_remind"])
     storage = app_cfg["storage"]
     data_dir = Path(storage["tasks"]).expanduser().parent
     profiles = Path(storage["profiles_dir"]).expanduser()
@@ -520,6 +576,7 @@ def main():
         "routine_titles": {r.get("title", "") for r in
                            load_yaml(Path(storage["recurring_events"]).expanduser()).get("recurring_events", [])},
         "goals": parse_goals_md(profiles / "goals.md"),
+        "login_expiry": google_login_expiry(),
         "holidays": holidays, "periods": periods,
     }
     state = State(data_dir / "notify_state.json")
@@ -555,6 +612,8 @@ def main():
             current = max(started, key=lambda s: hm(slots[s]))
             if msg := build_slot(ctx, current):
                 outbox.append((*msg, True))
+        if not quiet and (warn := build_login_warning(ctx, evening=bool(started) and current == "evening")):
+            outbox.append((*warn, False))
         if today.weekday() == 6 and at_or_after(now, cfg["review_time"]) and not quiet:
             outbox += [(*m, False) for m in build_review(ctx)]
 

@@ -21,6 +21,7 @@ Calendar and Gmail share one OAuth token (`google_token.json`); Drive (`/docs`) 
 - If a script fails with an auth error (`invalid_grant`, "needs re-authorization"), ask the user to run `.venv/bin/python scripts/google_auth.py` (add `--drive` for Drive). It opens a browser.
 - `.venv/bin/python scripts/google_auth.py --check` reports token status without opening a browser.
 - Never edit scopes in individual scripts — `SHARED_SCOPES` in `google_auth.py` is the single source.
+- The OAuth app stays in Google's **Testing** mode, so a sign-in lasts **7 days**. `google_auth.py` records each sign-in (`google_token.meta.json`); the notifier sends a 🔑 message with a **Renew now** button the evening before expiry and on the expiry morning. The button (or `.venv/bin/python scripts/google_auth.py --renew`) opens the sign-in in a browser on the Mac; the old token is kept until the new sign-in succeeds, and the result is reported on Telegram.
 
 ## Google Calendar
 
@@ -65,14 +66,17 @@ Two background agents run via launchd (`scripts/install_launchd.sh`; logs in `~/
 - **`telegram_bot.py`** — relays the user's Telegram messages to `claude -p` (Opus) in this repo, each prefixed with a `[SNAPSHOT]` from `scripts/brain_context.py` (time, day type, open tasks, 7 days of events, recurring meds/cards, latest inbox) so most replies need no file reads. Messages within 60 min continue the same Claude session; `/new` resets. Replies should be short plain text (phone screen). When the user replies to a notification, the quoted notification is prepended as `[Replying to this message you sent earlier: ...]` — resolve "done", "move it", "skip" against the `#id`s in it. It also handles the inline buttons below.
 - **`notify.py`** — runs every 15 min and decides what's worth sending (deterministic, no LLM). See its docstring for the full model. In short:
   - **Day types:** workday · offday (weekend/public holiday) · away (vacation/blackout in `calendar.md`).
-  - **Slots:** workday digest 09:00 (planning slot) · lunch 13:00 · evening 19:30; offday digest 08:30 · errands 10:30 · evening 19:00; away: digest only. Nothing non-critical during work hours except lunch.
-  - **Tiers:** `critical` pings at `remind_at` on the due day and repeats once if not ticked; `important` gets one batched ✓/Snooze ping in the slot that fits its `actionable` kind (on due day, `remind_days_before` days, and overdue days 1/3/7); `routine` is digest-only.
-  - **Fatigue controls:** quiet 22:30–07:00 (critical may run until 23:30 so a 22:00 med's repeat lands), max 3 slot messages/day, each item once per day, overdue items fade after day 7, Sunday 11:00 review for >14d overdue, 3rd snooze asks drop-or-reschedule.
+  - **Slots:** each day type has a digest, plus lunch/evening (workday) or errands/evening (offday) slots; away days get the digest only. Times come from `notify:` in config.yaml (neutral defaults in `notify.py`). Nothing non-critical during work hours except lunch.
+  - **Opt-in:** only tasks with `remind` / `remind_at` ping; everything else is digest-only (config `notify.auto_remind: true` restores inferring pings from priority/due date).
+  - **Timed:** a task with `remind_at` pings at that time on its due day; `critical` ones repeat once if not ticked. `important` tasks without a time get one batched ✓/Snooze ping in the slot that fits their `actionable` kind (due day, `remind_days_before` days, overdue days 1/3/7).
+  - **Fatigue controls:** quiet hours (critical pings may run until `critical_until`, so a late-evening reminder's repeat still lands), max 3 slot messages/day, each item once per day, overdue items fade after day 7, Sunday 11:00 review for >14d overdue, 3rd snooze asks drop-or-reschedule.
   - **Off-day digest** suggests up to 3 undated backlog tasks (rotating) and a high-priority goal.
   - **`scheduled_sync.sh`** (every 30 min) keeps Calendar, Gmail, recurring tasks/events fresh — no manual startup needed for reminders.
   - Preview: `.venv/bin/python scripts/notify.py --dry-run --at "YYYY-MM-DD HH:MM"`; tunables under `notify:` in `config.yaml`.
 
 **What this means when writing tasks:** set the reminder fields (below) whenever the user describes something time-sensitive. Use `priority: high` sparingly. Put "Depart by HH:MM" in event descriptions so reminders fire at the right time.
+
+**Voice notes:** the bot transcribes Telegram voice/audio notes on-device (`scripts/speech.py`, MLX; default NVIDIA Parakeet TDT 0.6B v2, English — `speech.model` in config.yaml switches to e.g. `mlx-community/whisper-large-v3-turbo`), echoes "🎙 “…”" and passes the text on prefixed with `[Voice message, transcribed on-device …]`. Treat such text as possibly misheard: sanity-check names, dates and numbers against tasks/profiles, and ask if an action depends on an uncertain word. Needs ffmpeg (Homebrew).
 
 One-off message from a script: `.venv/bin/python scripts/telegram_notify.py "text"`.
 
@@ -267,21 +271,21 @@ tasks:
     completed_at: null     # set to today's date when marking done (required for ttl_days to work)
     # Optional reminder fields (read by notify.py; also allowed on recurring_tasks templates):
     remind: important      # critical | important | routine — default: high→important, dated medium→important, else routine
-    remind_at: "21:00"     # critical only — exact ping time on the due day
+    remind_at: "21:00"     # ping at this time on the due day (set only when the user asks for a reminder)
     remind_days_before: [5, 2]  # extra heads-up pings N days before due
     actionable: business_hours  # business_hours | anytime (default) | weekend | office — when it can be done
     lapse: true            # missed occurrence just expires — no overdue nagging (meds)
 ```
 
-**Choosing reminder fields** — infer, and mention what you set in the confirmation line:
-| Kind of task | Fields |
+**Reminders are opt-in — add one only when the user asks** ("remind me", "ping me", "notify me", "send me a reminder"). Never add reminder fields on your own; without them a task appears only in the morning digest. Mention the reminder in the confirmation line.
+| The user asks for | Set |
 |---|---|
-| Medication / supplement | `remind: critical`, `remind_at`, `lapse: true` |
-| Bill / card payment | `remind: critical`, `remind_days_before: [5, 2]`, `actionable: anytime` |
-| Call or visit a bank / clinic / shop, book an appointment by phone | `actionable: business_hours` |
-| Needs a free day (tinkering, outings, long errands) | `actionable: weekend` |
-| Must be at office (printouts, hand-in) | `actionable: office` |
-| Nice-to-know, no ping wanted | `remind: routine` |
+| "remind me at 10" (with a time) | `--reminder 10:00` (needs `--due`) — one ping at that time on the due day |
+| "remind me" (no time) | `--reminder` — uses `notify.default_remind_at` from config (default 09:00); say which time you used |
+| "make sure I don't miss it" / payment / medication | `--remind critical` plus `--reminder HH:MM` — pings, repeats once if not ticked |
+| heads-up before a deadline ("remind me 2 days before") | `--remind-days-before 2` (+ `--remind important`) |
+| A call/visit that needs places open, when they ask for a reminder | add `--actionable business_hours` so heads-ups land at lunch |
+Recurring meds and bills set these in their `recurring_tasks.yaml` template.
 
 - **Add / change / complete — use `scripts/task.py`, not hand edits** (one command, validated, file-locked against the bot and generators):
   ```bash
